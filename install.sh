@@ -128,19 +128,35 @@ run_setup() {
 	bash "$TMP/pkg/setup-node.sh" "${args[@]}"
 }
 
+# find_client: đường dẫn lệnh mnv máy khách đã cài, kể cả khi chạy qua sudo
+# (PATH của root không có ~/.local/bin của người dùng).
+find_client() {
+	local home="" c
+	[[ -n ${SUDO_USER:-} && $SUDO_USER != root ]] && home=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+	for c in "$(command -v mnv 2>/dev/null || true)" ${home:+"$home/.local/bin/mnv"} "$HOME/.local/bin/mnv" /usr/local/bin/mnv; do
+		[[ -n $c && -x $c ]] && { echo "$c"; return; }
+	done
+}
+
 install_client() {
-	local name="mnv-$OS-$ARCH" dir
+	local name="mnv-$OS-$ARCH" dir target=${1:-}
 	[[ $OS == linux || $OS == darwin ]] || die "Windows: chạy trong PowerShell: irm https://raw.githubusercontent.com/$REPO/main/install.ps1 | iex"
 	say "Cài lệnh mnv $TAG ($OS/$ARCH)"
 	fetch "$name" "$TMP/mnv"
 	chmod +x "$TMP/mnv"
-	if [[ $EUID -eq 0 || -w /usr/local/bin ]]; then dir=/usr/local/bin; else dir=$HOME/.local/bin; mkdir -p "$dir"; fi
+	if [[ -n $target ]]; then
+		dir=$(dirname "$target")
+		[[ -w $dir ]] || die "$target cần quyền ghi: chạy lại với sudo"
+	elif [[ $EUID -eq 0 || -w /usr/local/bin ]]; then dir=/usr/local/bin; else dir=$HOME/.local/bin; mkdir -p "$dir"; fi
 	if [[ -f /var/lib/mnv/state.json && $dir == /usr/local/bin ]]; then
 		warn "máy này đang là server mnv: lệnh mnv đã có sẵn (máy khách + control/agent). Dùng 'update' để cập nhật."
 		exit 1
 	fi
 	mv -f "$TMP/mnv" "$dir/mnv"
+	# Cài qua sudo vào thư mục của người dùng: trả quyền sở hữu cho người đó.
+	if [[ $EUID -eq 0 && -n ${SUDO_USER:-} && $dir != /usr/local/bin ]]; then chown "$SUDO_USER": "$dir/mnv" 2>/dev/null || true; fi
 	ok "đã cài $dir/mnv ($("$dir/mnv" version))"
+	[[ -n $target ]] && return
 	case ":$PATH:" in *":$dir:"*) ;; *) warn "thêm vào PATH: echo 'export PATH=\"$dir:\$PATH\"' >> ~/.bashrc" ;; esac
 	echo
 	echo "Tiếp theo: mnv login https://<domain panel>"
@@ -148,6 +164,7 @@ install_client() {
 }
 
 do_update() {
+	local cur
 	if [[ -f /var/lib/mnv/state.json ]]; then
 		need_server
 		say "Cập nhật server mnv lên $TAG"
@@ -158,9 +175,9 @@ do_update() {
 			fetch_dist
 			run_setup --role control
 		fi
-	elif command -v mnv >/dev/null; then
-		say "Cập nhật lệnh mnv (máy khách): $(mnv version) → $TAG"
-		install_client
+	elif cur=$(find_client) && [[ -n $cur ]]; then
+		say "Cập nhật lệnh mnv (máy khách) $cur: $("$cur" version 2>/dev/null || echo '?') → $TAG"
+		install_client "$cur"
 	else
 		die "máy này chưa cài mnv"
 	fi
@@ -170,7 +187,7 @@ do_uninstall() {
 	if [[ $EUID -ne 0 ]]; then
 		# Không có sudo: chỉ gỡ được lệnh mnv của người dùng.
 		local p
-		p=$(command -v mnv || true)
+		p=$(find_client)
 		[[ -n $p ]] || die "máy này chưa cài mnv"
 		[[ -w $(dirname "$p") ]] || die "$p cần quyền root để gỡ: ... | sudo bash -s -- uninstall"
 		[[ -f /var/lib/mnv/state.json ]] && die "máy này đang là server mnv: gỡ bằng sudo (... | sudo bash -s -- uninstall)"
