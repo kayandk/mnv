@@ -19,6 +19,10 @@ ghi DNS A trỏ domain panel về IP của máy. Sau khi cài: `sudo mnv control
 
 ## Cập nhật và gỡ
 
+Panel tự kiểm tra bản mới mỗi 6 giờ. Có bản mới thì góc dưới thanh bên hiện **Có bản mới vX** — bấm vào,
+xem ghi chú phát hành rồi **Cập nhật**: server phụ cập nhật trước, rồi tới máy chính; panel khởi động lại
+khoảng một phút, service đang chạy không gián đoạn. Cập nhật bằng lệnh vẫn dùng được:
+
 ```bash
 # cập nhật (máy chính, server phụ hay máy khách — tự nhận ra), giữ dữ liệu, service chạy tiếp
 curl -fsSL https://raw.githubusercontent.com/kayandk/mnv/main/install.sh | sudo bash -s -- update
