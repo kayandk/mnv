@@ -129,10 +129,18 @@ run_setup() {
 }
 
 # find_client: đường dẫn lệnh mnv máy khách đã cài, kể cả khi chạy qua sudo
-# (PATH của root không có ~/.local/bin của người dùng).
+# (PATH của root không có ~/.local/bin của người dùng; hỗ trợ cả Linux và macOS).
 find_client() {
 	local home="" c
-	[[ -n ${SUDO_USER:-} && $SUDO_USER != root ]] && home=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+	if [[ -n ${SUDO_USER:-} && $SUDO_USER != root ]]; then
+		if command -v getent >/dev/null 2>&1; then
+			home=$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6 || true)
+		elif command -v dscl >/dev/null 2>&1; then
+			home=$(dscl . -read "/Users/$SUDO_USER" NFSHomeDirectory 2>/dev/null | awk '{print $2}' || true)
+		fi
+		[[ -z $home && -d "/Users/$SUDO_USER" ]] && home="/Users/$SUDO_USER"
+		[[ -z $home && -d "/home/$SUDO_USER" ]] && home="/home/$SUDO_USER"
+	fi
 	for c in "$(command -v mnv 2>/dev/null || true)" ${home:+"$home/.local/bin/mnv"} "$HOME/.local/bin/mnv" /usr/local/bin/mnv; do
 		[[ -n $c && -x $c ]] && { echo "$c"; return; }
 	done
@@ -157,7 +165,9 @@ install_client() {
 	if [[ $EUID -eq 0 && -n ${SUDO_USER:-} && $dir != /usr/local/bin ]]; then chown "$SUDO_USER": "$dir/mnv" 2>/dev/null || true; fi
 	ok "đã cài $dir/mnv ($("$dir/mnv" version))"
 	[[ -n $target ]] && return
-	case ":$PATH:" in *":$dir:"*) ;; *) warn "thêm vào PATH: echo 'export PATH=\"$dir:\$PATH\"' >> ~/.bashrc" ;; esac
+	local rc=".bashrc"
+	[[ ${SHELL:-} == *zsh || $OS == darwin ]] && rc=".zshrc"
+	case ":$PATH:" in *":$dir:"*) ;; *) warn "thêm vào PATH: echo 'export PATH=\"$dir:\$PATH\"' >> ~/$rc && source ~/$rc" ;; esac
 	echo
 	echo "Tiếp theo: mnv login https://<domain panel>"
 	echo "Gỡ:        rm $dir/mnv && rm -rf ~/.mnv"
